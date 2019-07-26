@@ -1,0 +1,1188 @@
+
+==============================zookeeper(动物管理员)集群配置详情============================================
+zookeeper是一个面向分布式系统的构建块。
+zookeeper是apache基金会用于管理hadoop的管理员，是基于java的开源项目，需要jdk的支持，运行在jvm中。
+
+Zookeeper虽然是一个针对分布式系统的协调服务，但它本身也是一个分布式应用程序；zookeeper遵循一个简单的
+客户端-服务器模型，其中客户端是使用服务的节点(即机器)，而服务器是提供服务的节点。
+zookeeper服务器的集合形成了一个zookeeper集合体(ensemble);
+在任何给定的时间内，一个Zookeeper客户端可连接到一个Zookeeper服务器。
+每个zookeeper服务器都可以同时处理大量客户端连接。
+如果客户端在指定时间内没有收到服务器的确认，那么客户端会连接到结合体中的另一台服务器，而且客户端会话会被
+透明地转移到新的Zookeeper服务器。
+
+
+1.首先搭建jdk的运行环境。
+	--配置几台服务器(关闭防火墙-->修改hostname vi/etc/sysconfig/network ,修改hosts文件，做ip和主机的映射: vi/etc/hosts)
+		-->实现各服务器之间的免登陆功能
+	-----------------reboot----------------
+	--配置java的环境变量:JAVA_HOME + PATH
+
+2.配置zookeeper集群服务器
+	2.1.分别在每个zookeeper服务器中配置以下信息：
+		2.1.1.修改zookeeper-x.x.x/conf配置文件下 zoo.sample.cfg文件为 ---> zoo.cfg文件
+			[root@zookeeper1 conf]# cat zoo.cfg 
+			---------------------start--------------------------------
+			# The number of milliseconds of each tick
+			tickTime=2000
+			# The number of ticks that the initial 
+			# synchronization phase can take
+			initLimit=10
+			# The number of ticks that can pass between 
+			# sending a request and getting an acknowledgement
+			syncLimit=5
+			# the directory where the snapshot is stored.
+			# do not use /tmp for storage, /tmp here is just 
+			# example sakes.
+			dataDir=/home/apps/zookeeper-3.4.6/data
+			# the port at which the clients will connect
+			clientPort=2181
+			# the maximum number of client connections.
+			# increase this if you need to handle more clients
+			#maxClientCnxns=60
+			#
+			# Be sure to read the maintenance section of the 
+			# administrator guide before turning on autopurge.
+			#
+			# http://zookeeper.apache.org/doc/current/zookeeperAdmin.html#sc_maintenance
+			#
+			# The number of snapshots to retain in dataDir
+			#autopurge.snapRetainCount=3
+			# Purge task interval in hours
+			# Set to "0" to disable auto purge feature
+			#autopurge.purgeInterval=1
+			server.1=zookeeper1:2888:3888
+			server.2=zookeeper2:2888:3888
+			server.3=zookeeper3:2888:3888
+
+			说明:
+			tickTime：这个时间是作为 Zookeeper 服务器之间或客户端与服务器之间维持心跳的时间间隔，也就是每个 tickTime 时间就会发送一个心跳。
+			dataDir：顾名思义就是 Zookeeper 保存数据的目录，默认情况下，Zookeeper 将写数据的日志文件也保存在这个目录里。
+			clientPort：这个端口就是客户端连接 Zookeeper 服务器的端口，Zookeeper 会监听这个端口，接受客户端的访问请求。
+			initLimit：这个配置项是用来配置 Zookeeper 接受客户端（这里所说的客户端不是用户连接 Zookeeper 服务器的客户端，而是 Zookeeper 服务器集群中连接到 Leader 的 Follower 服务器）初始化连接时最长能忍受多少个心跳时间间隔数。当已经超过 5个心跳的时间（也就是 tickTime）长度后 Zookeeper 服务器还没有收到客户端的返回信息，那么表明这个客户端连接失败。总的时间长度就是 5*2000=10 秒
+			syncLimit：这个配置项标识 Leader 与 Follower 之间发送消息，请求和应答时间长度，最长不能超过多少个 tickTime 的时间长度，总的时间长度就是 2*2000=4 秒
+			server.A=B：C：D：其中 A 是一个数字，表示这个是第几号服务器；B 是这个服务器的 ip 地址；C 表示的是这个服务器与集群中的 Leader 服务器交换信息的端口；D 表示的是万一集群中的 Leader 服务器挂了，需要一个端口来重新进行选举，选出一个新的 Leader，而这个端口就是用来执行选举时服务器相互通信的端口。如果是伪集群的配置方式，由于 B 都是一样，所以不同的 Zookeeper 实例通信端口号不能一样，所以要给它们分配不同的端口号。
+			--------------------------------end-------------------------------------
+			其中：
+				zookeeper1：代表域名映射的ip地址，
+			 	2888：是通讯端口号，
+			 	3888：是zookeeper选举端口号。
+			 注意:所有三个机器都应该打开端口 2181、2888 和 3888。
+			 	  端口2181由Zookeeper的客户端使用，用于连接到Zookeeper的服务器;
+			 	  端口2888由对等Zookeeper服务器使用，用于互相通信;
+			 	  端口3888用于领导者选举。
+			-----------------------------------------------------
+
+		2.1.2.在zoo.cfg配置文件"dataDir=/home/apps/zookeeper-3.4.6/data"文件目录下做以下操作:
+			新建myid文件，myid中的数字要和server.1,server.2,server.3...server.x中相对应。
+
+			分析myid文件的意义:
+				myid的值是zoo.cfg文件里定义的server.X项X的值，Zookeeper 启动时会读取这个文件，拿到里面的数据与 zoo.cfg 里面的配置信息比较从而判断到底是那个server，只启一个标识作用。
+
+3.启动zookeeper集群服务器:
+	/home/apps/zookeeper-3.4.6/bin/zkServer.sh start #启动
+		---->启动时的信息:
+			[root@zookeeper1 bin]# ./zkServer.sh start
+			JMX enabled by default
+			Using config: /home/apps/zookeeper-3.4.6/bin/../conf/zoo.cfg
+			Starting zookeeper ... STARTED
+
+	/home/apps/zookeeper-3.4.6/bin/zkServer.sh status #查看zookeeper状态
+		---->启动后的状态信息：
+			[root@zookeeper1 bin]# ./zkServer.sh start
+			JMX enabled by default
+			Using config: /home/apps/zookeeper-3.4.6/bin/../conf/zoo.cfg
+			Mode: follower
+
+3.zookeeper的数据模型:
+	3.1.zookeeper会维护一个具有层次关系的数据结构，它非常类似于一个标准的文件系统，但这个文件系统中没有文件和和目录，
+	    而是统一使用节点(node)的概念，称为znode。znode作为保存数据的容器，也构成一个层次化的命名空间。
+	    一个名称是由通过斜线"/"分割的路径名序列所组成的。
+	    zookeeper中的每个节点都是通过路径来识别。
+	3.2.znode:
+		zookeeper目录中的每个节点对应着一个znode，每个znode维护着一个属性结构，它包含数据的版本号、时间戳、等信息。
+		zookeeper就是通过这些属性来实现它特定的功能。
+		--每当znode的数据改变时，相应的版本号会增加，每当客户端查询、更新和删除数据时，也必须提供要被操作的znode版本号，
+		  如果所提供的数据版本号与实际的不匹配，那么将会操作失败。
+		--每个znode由3部分组成:
+				stat. 此为状态信息，描述该znode的版本，权限等信息
+				data. 与该znode关联的数据
+				children. 该znode下的子节点
+
+		--znode节点包含的字段:
+			Zxid:  zookeeper服务器上当前最新的事务ID
+			cZxid: 节点被创建的Zxid值
+			mZxid: 节点被修改时Zxid值
+			ctime: 节点创建的时间
+			mtime: 节点最后一次的修改时间
+			cversion: 节点所拥有的子节点被修改的版本号
+			aclVersion: 节点的ACL被修改的版本号
+			dataLength: 节点数据的长度
+			numChildren: 节点拥有子节点的个数
+			ephermeralOwner: 如果节点为临时节点，那么它的值为这个节点拥有者的session ID；
+							 如果该节点不是epthemeral临时节点,ephermeralOwner值为0X0.
+        --znode是客户端访问zookeeper的主要实体,它包含了以下主要特征:
+        	1) Watch 
+        		znode状态发生改变时(增删改等操作)，watch(监视器)机制可以让客户端得到通知，并且仅仅只会触发一次watch。
+        	2) 数据访问控制
+        		每个znode创建时间都会有一个ACL列表，用于决定谁可以执行那些操作。
+        	3) 临时节点
+        		zookeeper节点有两种:临时节点和持久节点。
+        			节点类型在创建时确定，并且不能修改。
+        			临时节点生命周期依赖创建它的会话，一旦会话结束，临时节点将会被删除。
+        			临时节点不允许有子节点。
+
+        		persistent节点:persistent节点不和特定的session绑定，不会随着创建该节点的session的结束而消失，
+        					   而是一直存在，除非该节点被显示删除。
+        		ephemeral节点:ephemeral节点时临时性的，如果创建该节点的session结束了，该节点就会被自动删除。
+        		              ephemeral节点不能拥有子节点。虽然ephemeral节点与创建它的session绑定，但只要该节点
+        		              没有被删除。其他session就可以读写该节点中关联的数据。
+        	4) 顺序节点
+        		当创建znode时设置了顺序节点，那么该znode路径之后便会附加一个递增的计数，这个计数对于此节点的
+        		父节点来说是唯一的。
+    eg：
+    /dubbo下的节点:
+	[zk: 192.168.1.148:2181(CONNECTED) 27] ls /dubbo
+	[com.ego.portal.service.IShoppingCartService, com.ego.portal.service.IItemCategoryService, com.ego.portal.service.ISearchItemsService, com.ego.portal.service.IItemService, com.dubbo.service.IUserService]
+
+3.zookeeper典型应用场景说明:
+	1) 数据发布与订阅(配置中心)
+		发布与订阅模型，即所谓的配置中心，顾名思义就是发布者将数据发布到ZK节点上，供订阅者动态获取数据，
+		实现配置信息的集中管理和动态更新。
+		例如:全局的配置信息，服务式服务框架的服务地址列表等就是非常适合使用的。
+
+		应用中用到的一些配置信息放到ZK上进行集中管理。这类场景通常是这样:应用在启动时候会主动来获取一次配置，同时，
+		在节点上注册一个Watcher，这样一来，以后每次配置有更新的时候，都会实时通知到订阅的客户端，从而达到获取最新
+		配置信息的目的。
+
+		分布式搜索服务中，索引的元信息和服务器集群机器的节点状态存放在ZK的一些指定节点，供各个客户端订阅使用。
+
+		分布式日志收集系统。这个系统的核心工作是收集分布在不同机器的日志。收集器通常是按照应用来分配收集任务单元，
+		因此需要在ZK上创建一个以应用名作为path的节点p，并将这个应用的所有机器ip及子节点的形式注册到节点p上，这样
+		以来就能够实现机器变动的时候，能够实时通知到收集器调用任务分配。
+
+
+	2) 负载均衡
+		这里的负载均衡是指软负载均衡。在分布式环境中，为了保证高可用性，通常同一个应用或同一个服务的提供方都会部署多份，
+		达到对等服务。
+		而消费者就须要在这些对等的服务器中选择一个来执行相关的业务逻辑，其中比较典型的是消息中间件中的生产者，消费者负载均衡。
+
+	3) 命名服务(Naming Service)*****
+		命名服务也是分布式系统中比较常见的一类场景。在分布式系统中，通过使用命名服务，客户端应用能够根据指定名字来获取资源
+		或服务的地址，提供者等信息。
+		被命名的实体通常可以是集群中的机器，提供的服务地址，远程对象等等----这些我们都可以统称他们为名字(Name).
+
+		其中最常见的就是一些分布式服务框架中的服务地址列表。
+		alibaba开源的分布式服务框架Dubbo中使用zookeeper来作为其命名服务，维护全局的服务地址列表。
+		在Dubbo中的实现:
+		--->服务提供者在启动时，向ZK上的指定节点/dubbo/${serviceName}/providers目录下写入自己的URL地址，这个操作完成了服务的发布。
+		--->服务消费者启动时，  订阅/dubbo/${serviceName}/providers目录下的提供者URL地址，并向/dubbo/${serviceName}/consumers目录下
+			                    写入自己的URL地址。
+			                    
+		注意:所有向ZK上注册的地址都是临时节点，这样就能够保证服务提供者和消费者能够自动感应资源的变化。
+		另外，Dubbo还有针对服务粒度的监控，方法是订阅/dubbo/${serviceName}目录下所有提供者和消费者的信息。
+
+    4) 分布式通知/协调****
+    	zookeeper中特有watcher注册于异步通知机制，能够很好的实现分布式环境下不同系统之间的通知和协调，实现对数据变更的实时处理。
+    	使用方法通常是不同系统都对ZK上同一个znode进行注册，监听znode的变化(包括znode本身内容及子节点)，其中一个系统update了znode
+    	那么另一个系统能够收到通知，并作出相应处理。
+
+    	另一种是心跳检查机制:检查系统和被检测系统之间并不直接关联起来，而是通过ZK上某个节点关联，大大减少系统耦合性。
+
+    	另一种系统调度模式:某系统有控制台和推送系统两部分组成，控制台的职责是控制推送系统进行相应的推送工作。管理人员在控制台作的
+    					   一些操作，实际上是修改了ZK上某些节点的状态，而ZK就把这些变化通知给他们注册watcher的客户端，即推送系统，
+    					   于是，作出相应的推送任务。
+    	另一种工作汇报模式:一些类似于任务发布系统，子任务启动后，到ZK来注册一个临时节点，并且定时将自己的进度进行汇报(将进度写回
+    					   这个临时节点)，这样任务管理者就能够实时知道任务进度。
+
+
+    5) 集群管理与Master选举****
+    	集群机器监控:这通常用于对集群中机器状态，机器在线率有较高要求的场景，能够快速对集群中机器的变化作出响应。(如:ping定时检测每个机器)
+
+    	利用zookeeper的两个特性，就可以实施监控集群机器存活性。
+
+    	客户端在节点x上注册一个watcher，那么如果x的节点变化了，会通知该客户端。
+    	创建ephemeral类型的节点，一旦客户端和服务器的会话结束或过期，那么该节点就会消失。
+    	eg:监控系统在/clusterServers 节点上注册一个watcher，以后每动态加机器，那么就往/clusterServers节点下创建一个ephemeral类型的节点
+    	   /clusterServers/{hostname} 这样，监控系统就能够实时知道机器的增减情况，至于后续就是监控系统的业务啦。
+
+    	Master选举则是zookeeper中最为经典的应用场景。
+    	--在分布式环境中，相同的业务应用分布在不同的机器上，有些业务逻辑，往往只需要让整个集群中的某台机器进行执行，其余机器共享这个结果，
+    	  这样可以大大减少重复劳动，提高性能，于是Master选举便是这种场景下的碰到的主要问题。
+    	  利用zookeeper的强一致性，能够保证在分布式高并发情况下节点创建的全局唯一性，即:同时有多个客户端请求创建/currentMaster 节点，
+    	  最终一定只有一个客户端请求能够创建成功，利用这个特性，就能够轻易的在分布式环境中进行集群选举了。
+
+    	--另外，这种场景演化一下，就是动态Master选举。就要用到ephemeral_sequential 类型节点的特性啦。
+    	  上文提到，所有客户端创建请求，最终只有一个能够创建成功。
+    	  在这里稍作变化，就是允许所有请求都能够创建成功，但是得有个创建顺序，于是所有的请求最终在ZK上创建结果的一种可能性是这样的:
+    	  /currentMaster/${sessionID}-1,?/currentMaster/{sessionID}-2,?/currentMaster/{sessionID}-3.....每次选取序列号最小的那个机器
+    	  作为Master，如果这个机器挂了，由于其创建的节点会删除，那么之后最小的那个机器就是Master。
+
+    6) 分布式锁
+    7) 分布式队列
+
+==============================================zookeeper集群搭建end===============================================================
+4.Zookeeper常用命令(常用命令；客户端连接；查看znode路径；创建节点；获取znode数据，查看节点内容，设置节点内容，删除节点；
+					监听znode事件；telnet连接zookeeper):
+	启动ZK服务
+	bin/zkServer.sh start
+	查看ZK服务状态
+	bin/zkServer.sh status
+	停止ZK服务
+	bin/zkServer.sh stop
+	重启ZK服务
+	bin/zkServer.sh restart
+	连接服务器
+	zkCli.sh -server 127.0.0.1:2181
+
+==================================================================================================================================
+5.理解dubbo+zookeeper联系:
+	zookeeper相当一个文件系统，可以用来存储数据，所谓的注册到zk上去，就是把接口信息写到zk上去保存起来。通过命令可以清楚看到dubbo其实把接口调用信息全都注册到zk上了，通过我们通过另一个dubbo（注册在相同的zk上）去消费，dubbo上记录了接口的调用信息就可以，通过这些信息去调用接口。
+
+	其实zookeeper只负责注册，调用方法是由dubbo去调就是zookeeper的配置管理功能体现。还有zookeeper在这里还有负载均衡的体现，dubbo上有三个默认负载均衡算法，RandomLoadBalance（随机算法），RoundRobinLoadBalance（轮询算法），LeastActiveLoadBalance（最少活跃算法）。zookeeper将用你选择的算法，为你选择一台机器，因此zookeeper就帮你负载均衡了。
+
+==================================================================================================================================
+6.连接zookeeper服务器:
+	进入zookeeper安装目录下的bin目录,
+	[root@zookeeper1 bin]# ./zkCli.sh -server 127.0.0.1:2181
+================================================================
+7.dubbo中的服务提供者和消费者的配置文件：
+	7.1.applicationContext-provider.xml文件信息:
+		// 提供方应用信息，用于计算依赖关系
+		<dubbo:application name="dubbo-b-server" />
+		// 使用zookeeper注册中心暴露服务地址
+		<dubbo:registry address="zookeeper://192.168.1.141:2181"  />
+		// 用dubbo协议在20880端口暴露服务
+		<dubbo:protocol name="dubbo" port="20880" />
+		// 声明需要暴露的服务接口
+		<dubbo:service interface="com.dubbo.service.IUserService" ref="userService"  timeout="30000" />
+		// 和本地bean一样实现服务
+		<bean id="userService" class="com.dubbo.service.impl.UserServiceImpl"></bean>
+	7.2.applicationContext-consumer.xml文件信息
+		// 消费应用名，用于计算依赖关系，表示匹配条件，不要与提供方一样
+		<dubbo:application name="dubbo-a-consumer" />
+		<!-- 
+			需要依赖于zookeeper check="false":不需要去检查zookeeper的存活状态，连接不上直接报错
+			如果设置为true，就算zookeeper全部宕机，消费者项目也会一直做重新连接不会报错
+		-->
+		// 使用zookeeper注册中心暴露发现服务地址
+		// check = false , 关闭注册中心启动时检查:(注册订阅失败时报错)
+		<dubbo:registry address="zookeeper://192.168.1.141:2181" check="false" />
+		// 关闭所有服务的启动时检查:(没有提供者时报错) 
+		<dubbo:consumer check="false"></dubbo:consumer>
+		// 生成远程服务代理，可以和本地bean一样使用dubbo service
+		// check = false , 关闭某个服务的启动时检查
+		<dubbo:reference id="userService" interface="com.dubbo.service.IUserService" check="false" timeout="30000" />
+
+===============================================================================================================================
+8.关于check=false的说明:
+	Dubbo缺省会在启动时检查依赖的服务是否可用，不可用时会抛出异常，阻止spring初始化完成，以便上线时，能及早发现问题
+	默认check=true。
+
+	如果使用的spring容器时懒加载的，或者通过API编程延迟引用服务，那么需要关闭check，否则服务临时不可用，会抛出异常，拿到null引用。
+	如果check=false，则总会返回引用，当服务恢复时，自动连上。
+
+	通过check=false关闭检查。
+
+	1) 关闭某个服务的启动时检查：(没有提供者时报错)
+	<dubbo:reference interface="com.xxx.XxxService" check="false"/>
+	2) 关闭所有服务检查：(没有提供者时报错)
+	<dubbo:consumer check="false"/>
+	3) 关闭注册中心启动时检查：(注册订阅失败时报错)
+	<dubbo:registry check="false"/>
+
+=============================================================================================================================
+9.Dubbo异步方法调用(有个坑)
+	dubbo是一个分布式服务框架，是阿里巴巴SOA服务化治理方案的核心框架。
+
+	客户端远程异步调用ServiceA，ServiceA在处理客户端请求的过程中需要远程同步调用ServiceB，
+	ServiceA从ServiceB的响应中取数据时，得到的是null。
+  -->解决方法?????
+============================================================================================
+10.dubbo配置项的解析:---在dubbo项目的子模块:dubbo-config-api中存在，属于dubbo10层架构中的config层
+	解析类:com.alibaba.dubbo.config.spring.schema.DubboNamespaceHandler
+	能够解析的命名空间有:
+		public class DubboNamespaceHandler extends NamespaceHandlerSupport {
+		    static {
+		        Version.checkDuplicate(DubboNamespaceHandler.class);
+		    }
+		    public void init() {
+		        registerBeanDefinitionParser("application", new DubboBeanDefinitionParser(ApplicationConfig.class, true));
+		        registerBeanDefinitionParser("module", new DubboBeanDefinitionParser(ModuleConfig.class, true));
+		        registerBeanDefinitionParser("registry", new DubboBeanDefinitionParser(RegistryConfig.class, true));
+		        registerBeanDefinitionParser("monitor", new DubboBeanDefinitionParser(MonitorConfig.class, true));
+		        registerBeanDefinitionParser("provider", new DubboBeanDefinitionParser(ProviderConfig.class, true));
+		        registerBeanDefinitionParser("consumer", new DubboBeanDefinitionParser(ConsumerConfig.class, true));
+		        registerBeanDefinitionParser("protocol", new DubboBeanDefinitionParser(ProtocolConfig.class, true));
+		        registerBeanDefinitionParser("service", new DubboBeanDefinitionParser(ServiceBean.class, true));
+		        registerBeanDefinitionParser("reference", new DubboBeanDefinitionParser(ReferenceBean.class, false));
+		        registerBeanDefinitionParser("annotation", new DubboBeanDefinitionParser(AnnotationBean.class, true));
+		    }
+		}
+
+		------------------------------------------------------------------------------------------------------------------------
+		Configuration Relation:
+
+		<dubbo:application/> 应用配置，用于配置当前应用信息，不管该应用是提供者还是消费者。
+		<dubbo:module/> 模块配置，用于配置当前模块信息，可选。
+		<dubbo:registry/> 注册中心配置，用于配置连接注册中心相关信息。
+		<dubbo:monitor/> 监控中心配置，用于配置连接监控中心相关信息，可选。
+		<dubbo:provider/> 提供方的缺省值，当ProtocolConfig和ServiceConfig某属性没有配置时，采用此缺省值，可选。
+		<dubbo:consumer/> 消费方缺省配置，当ReferenceConfig某属性没有配置时，采用此缺省值，可选。
+		<dubbo:protocol/> 协议配置，用于配置提供服务的协议信息，协议由提供方指定，消费方被动接受。
+		<dubbo:service/> 服务配置，用于暴露一个服务，定义服务的元信息，一个服务可以用多个协议暴露，一个服务也可以注册到多个注册中心。
+		<dubbo:reference/> 引用配置，用于创建一个远程服务代理，一个引用可以指向多个注册中心。
+		<dubbo:method/> 方法配置，用于ServiceConfig和ReferenceConfig指定方法级的配置信息。
+		<dubbo:argument/> 用于指定方法参数配置。
+		------------------------------------------------------------------------------------------------------------------------
+		/**
+		 * @param name: 应用名称 
+		 */
+		<dubbo:application name="dubbo-b-server" />    ----> ApplicationConfig(C)
+		/**
+		 * @param address:注册中心地址
+		 * @param check:启动时检查注册中心是否存在
+		 */
+		<dubbo:registry address="zookeeper://192.168.1.141:2181" check="false" /> ---> RegistryConfig(C)
+
+		/**
+		 * @param name:服务协议名称
+		 * @param port:服务端口号 
+		 */
+		<dubbo:protocol name="dubbo" port="20880" /> ---> ProtocolConfig(C)
+
+		/**
+		 * @param interface: 接口类路径
+		 * @param ref:接口实现类引用
+		 * @param timeout:远程调用超时时间(毫秒)
+		 */
+		<dubbo:service interface="com.dubbo.service.IUserService" ref="userService"  timeout="30000" /> 
+		<bean id="userService" class="com.dubbo.service.impl.UserServiceImpl"></bean>
+		---> ServiceBean--> ServiceConfig ---> AbstractMethodConfig
+		/**
+		 * @param id: 
+		 * @param interface:接口的类路径
+		 * @param check:检查服务提供者是否存在
+		 * @param timeout:远程调用超时时间
+		 */
+		<dubbo:reference id="userService" interface="com.dubbo.service.IUserService" check="false" timeout="30000" />
+		---> ReferenceBean ---> ReferenceConfig ---> AbstractMethodConfig ---> AbstractConfig
+		<dubbo:consumer check="false"/>  ---> ConsumerConfig(C)
+======================================================================================================================
+11.dubbo10层框架中的proxy层
+	11.1.ProxyFactory接口:
+		public interface ProxyFactory {
+		    /**
+		     * 从config层的referenceConfig中获取代理对象proxy
+		     * create proxy.
+		     *
+		     * @param invoker
+		     * @return proxy
+		     */
+		    @Adaptive({Constants.PROXY_KEY})
+		    <T> T getProxy(Invoker<T> invoker) throws RpcException;
+		    /**
+		     * 从config层的ServiceConfig中获取Invoker对象
+		     * create invoker.
+		     *
+		     * @param <T>
+		     * @param proxy
+		     * @param type
+		     * @param url
+		     * @return invoker
+		     */
+		    @Adaptive({Constants.PROXY_KEY})
+		    <T> Invoker<T> getInvoker(T proxy, Class<T> type, URL url) throws RpcException;
+		}
+	11.2.Invoker接口:(服务的本地代理)
+		// Invoker:是Provider的一个可调用Service的抽象，Invoker封装了Provider地址及Service接口信息。
+		public interface Invoker<T> extends Node {
+		    /**
+		     * 获取Service层对外提供的服务接口
+		     * get service interface.
+		     *
+		     * @return service interface.
+		     */
+		    Class<T> getInterface();
+		    /**
+		     * 回调Service层接口实现类中的方法
+		     * invoke.
+		     *
+		     * @param invocation
+		     * @return result
+		     * @throws RpcException
+		     */
+		    Result invoke(Invocation invocation) throws RpcException;
+		}
+	11.3.Proxy接口:
+		public abstract class Proxy {
+			// 封装了所有接口的透明化代理
+		}
+=======================================================================================================================
+12.dubbo框架的Registry层
+	12.1.中间层Registry
+		public interface Registry extends Node, RegistryService {
+		}
+		public interface Node {
+			// 
+		    URL getUrl();
+		    boolean isAvailable();
+		    void destroy();
+		}
+		/**
+		 * @description:包含注册服务、订阅服务、查看注册服务地址等功能
+		 */
+		public interface RegistryService {
+		    /**
+		     * 注册数据，比如：提供者地址，消费者地址，路由规则，覆盖规则，等数据。
+		     * <p>
+		     * 注册需处理契约：<br>
+		     * 1. 当URL设置了check=false时，注册失败后不报错，在后台定时重试，否则抛出异常。<br>
+		     * 2. 当URL设置了dynamic=false参数，则需持久存储，否则，当注册者出现断电等情况异常退出时，需自动删除。<br>
+		     * 3. 当URL设置了category=routers时，表示分类存储，缺省类别为providers，可按分类部分通知数据。<br>
+		     * 4. 当注册中心重启，网络抖动，不能丢失数据，包括断线自动删除数据。<br>
+		     * 5. 允许URI相同但参数不同的URL并存，不能覆盖。<br>
+		     *
+		     * @param url 注册信息，不允许为空，如：dubbo://10.20.153.10/com.alibaba.foo.BarService?version=1.0.0&application=kylin
+		     */
+		    void register(URL url);
+		    /**
+		     * 订阅符合条件的已注册数据，当有注册数据变更时自动推送.
+		     * <p>
+		     * 订阅需处理契约：<br>
+		     * 1. 当URL设置了check=false时，订阅失败后不报错，在后台定时重试。<br>
+		     * 2. 当URL设置了category=routers，只通知指定分类的数据，多个分类用逗号分隔，并允许星号通配，表示订阅所有分类数据。<br>
+		     * 3. 允许以interface,group,version,classifier作为条件查询，如：interface=com.alibaba.foo.BarService&version=1.0.0<br>
+		     * 4. 并且查询条件允许星号通配，订阅所有接口的所有分组的所有版本，或：interface=*&group=*&version=*&classifier=*<br>
+		     * 5. 当注册中心重启，网络抖动，需自动恢复订阅请求。<br>
+		     * 6. 允许URI相同但参数不同的URL并存，不能覆盖。<br>
+		     * 7. 必须阻塞订阅过程，等第一次通知完后再返回。<br>
+		     *
+		     * @param url      订阅条件，不允许为空，如：consumer://10.20.153.10/com.alibaba.foo.BarService?version=1.0.0&application=kylin
+		     * @param listener 变更事件监听器，不允许为空
+		     */
+		    void subscribe(URL url, NotifyListener listener);
+		    /**
+		     * 查询符合条件的已注册数据，与订阅的推模式相对应，这里为拉模式，只返回一次结果。
+		     *
+		     * @param url 查询条件，不允许为空，如：consumer://10.20.153.10/com.alibaba.foo.BarService?version=1.0.0&application=kylin
+		     * @return 已注册信息列表，可能为空，含义同{@link com.alibaba.dubbo.registry.NotifyListener#notify(List<URL>)}的参数。
+		     * @see com.alibaba.dubbo.registry.NotifyListener#notify(List)
+		     */
+		    List<URL> lookup(URL url);
+		}
+	12.2.提供者中的RegistryFactory接口:
+		public interface RegistryFactory {
+		    /**
+		     * 连接注册中心.
+		     * <p>
+		     * 连接注册中心需处理契约：<br>
+		     * 1. 当设置check=false时表示不检查连接，否则在连接不上时抛出异常。<br>
+		     * 2. 支持URL上的username:password权限认证。<br>
+		     * 3. 支持backup=10.20.153.10备选注册中心集群地址。<br>
+		     * 4. 支持file=registry.cache本地磁盘文件缓存。<br>
+		     * 5. 支持timeout=1000请求超时设置。<br>
+		     * 6. 支持session=60000会话超时或过期设置。<br>
+		     *
+		     * @param url 注册中心地址，不允许为空
+		     * @return 注册中心引用，总不返回空
+		     */
+		    @Adaptive({"protocol"})
+		    Registry getRegistry(URL url);
+		}
+	12.3.消费方的NotifyListener接口
+		public interface NotifyListener {
+		    /**
+		     * 当收到服务变更通知时触发。
+		     * <p>
+		     * 通知需处理契约：<br>
+		     * 1. 总是以服务接口和数据类型为维度全量通知，即不会通知一个服务的同类型的部分数据，用户不需要对比上一次通知结果。<br>
+		     * 2. 订阅时的第一次通知，必须是一个服务的所有类型数据的全量通知。<br>
+		     * 3. 中途变更时，允许不同类型的数据分开通知，比如：providers, consumers, routers, overrides，允许只通知其中一种类型，但该类型的数据必须是全量的，不是增量的。<br>
+		     * 4. 如果一种类型的数据为空，需通知一个empty协议并带category参数的标识性URL数据。<br>
+		     * 5. 通知者(即注册中心实现)需保证通知的顺序，比如：单线程推送，队列串行化，带版本对比。<br>
+		     *
+		     * @param urls 已注册信息列表，总不为空，含义同{@link com.alibaba.dubbo.registry.RegistryService#lookup(URL)}的返回值。
+		     */
+		    void notify(List<URL> urls);
+		}
+	12.4.消费方的RegistryDirectory类
+	public class RegistryDirectory<T> extends AbstractDirectory<T> implements NotifyListener {
+		
+		/**
+		 * @param urls : 将urls转成invokers，如果urls已被refer过，不再重新引用
+		 *
+		 */
+		private Map<String, Invoker<T>> toInvokers(List<URL> urls) {
+			Invoker<T> invoker = localUrlInvokerMap == null ? null : localUrlInvokerMap.get(key);
+			if(invoker == null){// 缓存中没有，重新refer
+				/**
+				 * InvokerDelegete：代理类，主要用于存储注册中心下发的url地址，
+				 * 用于重新重新refer时能够根据providerURL queryMap overrideMap重新组装
+				 */
+				invoker = new InvokerDelegete<T>(protocol.refer(serviceType, url), url, providerUrl);
+			}
+		}
+
+		......
+	}
+	12.5.消费者和提供者共同拥有的类:RegistryProtocol
+		public class RegistryProtocol implements Protocol {
+			/**
+			 * @description : 根据invoker的地址获取registry实例
+			 */
+			private Registry getRegistry(final Invoker<?> originInvoker) {
+				URL registryUrl = originInvoker.getUrl();
+				return registryFactory.getRegistry(registryUrl);
+			}
+
+			/**
+			 * @description 
+			 */
+			private Cluster getMergeableCluster() {
+		        return ExtensionLoader.getExtensionLoader(Cluster.class).getExtension("mergeable");
+		    }
+		    /**
+		     * @description 去引用cluster中的服务
+		     */
+		    private <T> Invoker<T> doRefer(Cluster cluster, Registry registry, Class<T> type, URL url) {
+		    	/**
+		    	 * @description :Merge the directory invokers to a virtual invoker.
+		    	 */
+		    	return cluster.join(directory);
+		    }
+		    /**
+		     * @description : export invoker
+		     */
+		    public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
+		    	return new Exporter<T>() {
+		            public Invoker<T> getInvoker() {
+		                return exporter.getInvoker();
+		            }
+
+		            public void unexport() {
+		                try {
+		                    exporter.unexport();
+		                } catch (Throwable t) {
+		                    logger.warn(t.getMessage(), t);
+		                }
+		                try {
+		                    registry.unregister(registedProviderUrl);
+		                } catch (Throwable t) {
+		                    logger.warn(t.getMessage(), t);
+		                }
+		                try {
+		                    overrideListeners.remove(overrideSubscribeUrl);
+		                    registry.unsubscribe(overrideSubscribeUrl, overrideSubscribeListener);
+		                } catch (Throwable t) {
+		                    logger.warn(t.getMessage(), t);
+		                }
+		            }
+		        };
+		    }
+		}
+=============================================================================================================
+13.Dubbo框架的Cluster层:
+	13.1.Cluster接口:
+		public interface Cluster {
+		    /**
+		     * Merge the directory invokers to a virtual invoker.
+		     *
+		     * @param <T>
+		     * @param directory
+		     * @return cluster invoker
+		     * @throws RpcException
+		     */
+		    @Adaptive
+		    <T> Invoker<T> join(Directory<T> directory) throws RpcException;
+		}
+	13.2.RouterFactory接口:
+		public interface RouterFactory {
+		    /**
+		     * Create router.
+		     *
+		     * @param url
+		     * @return router
+		     */
+		    @Adaptive("protocol")
+		    Router getRouter(URL url);
+		}
+	13.3.消费者的Router接口:
+		public interface Router extends Comparable<Router> {
+		    /**
+		     * get the router url.
+		     *
+		     * @return url
+		     */
+		    URL getUrl();
+		    /**
+		     * route.
+		     *
+		     * @param invokers
+		     * @param url        refer url
+		     * @param invocation
+		     * @return routed invokers
+		     * @throws RpcException
+		     */
+		    <T> List<Invoker<T>> route(List<Invoker<T>> invokers, URL url, Invocation invocation) throws RpcException;
+		}
+	13.4.消费者的Directory接口:
+		public interface Directory<T> extends Node {
+		    /**
+		     * get service type.
+		     *
+		     * @return service type.
+		     */
+		    Class<T> getInterface();
+		    /**
+		     * list invokers.
+		     *
+		     * @return invokers
+		     */
+		    List<Invoker<T>> list(Invocation invocation) throws RpcException;
+		}
+	13.5.消费者的Invoker接口:
+		public interface Invoker<T> extends Node {
+		    /**
+		     * get service interface.
+		     *
+		     * @return service interface.
+		     */
+		    Class<T> getInterface();
+		    /**
+		     * invoke.
+		     *
+		     * @param invocation
+		     * @return result
+		     * @throws RpcException
+		     */
+		    Result invoke(Invocation invocation) throws RpcException;
+		}
+	13.6.消费者的LoadBalance接口：
+		public interface LoadBalance {
+		    /**
+		     * select one invoker in list.
+		     *
+		     * @param invokers   invokers.
+		     * @param url        refer url
+		     * @param invocation invocation.
+		     * @return selected invoker.
+		     */
+		    @Adaptive("loadbalance")
+		    <T> Invoker<T> select(List<Invoker<T>> invokers, URL url, Invocation invocation) throws RpcException;
+		}
+==================================================================================================================
+14.Dubbo框架的monitor层:
+	14.1.消费者和提供者共同具体的接口:MonitorFactory
+		public interface MonitorFactory {
+		    /**
+		     * Create monitor.
+		     *
+		     * @param url
+		     * @return monitor
+		     */
+		    @Adaptive("protocol")
+		    Monitor getMonitor(URL url);
+		}
+	14.2.消费者的Monitor接口:
+		public interface Monitor extends Node, MonitorService {
+
+		}
+		-->其继承的父接口:MonitorService
+		public interface MonitorService {
+		    String APPLICATION = "application";
+		    String INTERFACE = "interface";
+		    String METHOD = "method";
+		    String GROUP = "group";
+		    String VERSION = "version";
+		    String CONSUMER = "consumer";
+		    String PROVIDER = "provider";
+		    String TIMESTAMP = "timestamp";
+		    String SUCCESS = "success";
+		    String FAILURE = "failure";
+		    String INPUT = Constants.INPUT_KEY;
+		    String OUTPUT = Constants.OUTPUT_KEY;
+		    String ELAPSED = "elapsed";
+		    String CONCURRENT = "concurrent";
+		    String MAX_INPUT = "max.input";
+		    String MAX_OUTPUT = "max.output";
+		    String MAX_ELAPSED = "max.elapsed";
+		    String MAX_CONCURRENT = "max.concurrent";
+
+		    /**
+		     * 监控数据采集.
+		     * 1. 支持调用次数统计：count://host/interface?application=foo&method=foo&provider=10.20.153.11:20880&success=12&failure=2&elapsed=135423423
+		     * 1.1 host,application,interface,group,version,method 记录监控来源主机，应用，接口，方法信息。
+		     * 1.2 如果是消费者发送的数据，加上provider地址参数，反之，加上来源consumer地址参数。
+		     * 1.3 success,faulure,elapsed 记录距上次采集，调用的成功次数，失败次数，成功调用总耗时，平均时间将用总耗时除以成功次数。
+		     *
+		     * @param statistics
+		     */
+		    void collect(URL statistics);
+
+		    /**
+		     * 监控数据查询. 
+		     * 1. 支持按天查询：count://host/interface?application=foo&method=foo&side=provider&view=chart&date=2012-07-03
+		     * 1.1 host,application,interface,group,version,method 查询主机，应用，接口，方法的匹配条件，缺失的条件的表示全部，host用0.0.0.0表示全部。
+		     * 1.2 side=consumer,provider 查询由调用的哪一端采集的数据，缺省为都查询。
+		     * 1.3 缺省为view=summary，返回全天汇总信息，支持view=chart表示返回全天趋势图表图片的URL地址，可以进接嵌入其它系统的页面上展示。
+		     * 1.4 date=2012-07-03 指定查询数据的日期，缺省为当天。
+		     *
+		     * @param query
+		     * @return statistics
+		     */
+		    List<URL> lookup(URL query);
+		}
+	14.3.消费者的MonitorFiler接口
+		public class MonitorFilter implements Filter {
+			// 调用过程拦截
+    		public Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException {
+
+    		}
+
+    		 // 信息采集
+    		private void collect(Invoker<?> invoker, Invocation invocation, Result result, String remoteHost, long start, boolean error) {
+
+    		}
+    		......
+		}
+==========================================================================================================================
+15.Dubbo框架的Protocol层:
+	15.1.消费者和提供者共同拥有的Protocol接口:
+		public interface Protocol {
+		    /**
+		     * 获取缺省端口，当用户没有配置端口时使用。
+		     *
+		     * @return 缺省端口
+		     */
+		    int getDefaultPort();
+		    /**
+		     * 暴露远程服务：<br>
+		     * 1. 协议在接收请求时，应记录请求来源方地址信息：RpcContext.getContext().setRemoteAddress();<br>
+		     * 2. export()必须是幂等的，也就是暴露同一个URL的Invoker两次，和暴露一次没有区别。<br>
+		     * 3. export()传入的Invoker由框架实现并传入，协议不需要关心。<br>
+		     *
+		     * @param <T>     服务的类型
+		     * @param invoker 服务的执行体
+		     * @return exporter 暴露服务的引用，用于取消暴露
+		     * @throws RpcException 当暴露服务出错时抛出，比如端口已占用
+		     */
+		    @Adaptive
+		    <T> Exporter<T> export(Invoker<T> invoker) throws RpcException;
+		    /**
+		     * 引用远程服务：<br>
+		     * 1. 当用户调用refer()所返回的Invoker对象的invoke()方法时，协议需相应执行同URL远端export()传入的Invoker对象的invoke()方法。<br>
+		     * 2. refer()返回的Invoker由协议实现，协议通常需要在此Invoker中发送远程请求。<br>
+		     * 3. 当url中有设置check=false时，连接失败不能抛出异常，并内部自动恢复。<br>
+		     *
+		     * @param <T>  服务的类型
+		     * @param type 服务的类型
+		     * @param url  远程服务的URL地址
+		     * @return invoker 服务的本地代理
+		     * @throws RpcException 当连接服务提供方失败时抛出
+		     */
+		    @Adaptive
+		    <T> Invoker<T> refer(Class<T> type, URL url) throws RpcException;
+		    /**
+		     * 释放协议：<br>
+		     * 1. 取消该协议所有已经暴露和引用的服务。<br>
+		     * 2. 释放协议所占用的所有资源，比如连接和端口。<br>
+		     * 3. 协议在释放后，依然能暴露和引用新的服务。<br>
+		     */
+		    void destroy();
+		}
+	15.2.提供者的Exporter接口:
+		public interface Exporter<T> {
+		    /**
+		     * get invoker.
+		     *
+		     * @return invoker
+		     */
+		    Invoker<T> getInvoker();
+		    /**
+		     * unexport.
+		     * <p>
+		     * <code>
+		     * getInvoker().destroy();
+		     * </code>
+		     */
+		    void unexport();
+		}
+	15.3.消费者的Invoker接口:
+		public interface Invoker<T> extends Node {
+		    /**
+		     * get service interface.
+		     *
+		     * @return service interface.
+		     */
+		    Class<T> getInterface();
+		    /**
+		     * invoke.
+		     *
+		     * @param invocation
+		     * @return result
+		     * @throws RpcException
+		     */
+		    Result invoke(Invocation invocation) throws RpcException;
+		}
+	15.4.消费者的Filter接口:
+		public interface Filter {
+		    /**
+		     * do invoke filter.
+		     * <p>
+		     * <code>
+		     * // before filter
+		     * Result result = invoker.invoke(invocation);
+		     * // after filter
+		     * return result;
+		     * </code>
+		     *
+		     * @param invoker    service
+		     * @param invocation invocation.
+		     * @return invoke result.
+		     * @throws RpcException
+		     * @see com.alibaba.dubbo.rpc.Invoker#invoke(Invocation)
+		     */
+		    Result invoke(Invoker<?> invoker, Invocation invocation) throws RpcException;
+		}
+	15.5.Protocol接口的具体实现类:DubboProtocol(间接实现Protocol接口)
+		public class DubboProtocol extends AbstractProtocol {
+			// 引用服务
+			public <T> Invoker<T> refer(Class<T> serviceType, URL url) throws RpcException {
+		        // create rpc invoker.
+		        DubboInvoker<T> invoker = new DubboInvoker<T>(serviceType, url, getClients(url), invokers);
+		        invokers.add(invoker);
+		        return invoker;
+		    }
+		    // 暴露服务
+		    public <T> Exporter<T> export(Invoker<T> invoker) throws RpcException {
+		    	.........
+		    	return exporter;
+		    }
+		}
+	15.6.Exporter接口的间接实现类DubboExporter
+	15.7.Invoker接口的间接实现类DubboInvoker
+
+===================================================================================================================
+16.Dubbo框架的Exchanger层:
+	16.1.消费者和提供者共同拥有的接口Exchanger
+		public interface Exchanger {
+		    /**
+		     * bind.
+		     *
+		     * @param url
+		     * @param handler
+		     * @return message server
+		     */
+		    @Adaptive({Constants.EXCHANGER_KEY})
+		    ExchangeServer bind(URL url, ExchangeHandler handler) throws RemotingException;
+		    /**
+		     * connect.
+		     *
+		     * @param url
+		     * @param handler
+		     * @return message channel
+		     */
+		    @Adaptive({Constants.EXCHANGER_KEY})
+		    ExchangeClient connect(URL url, ExchangeHandler handler) throws RemotingException;
+
+		}
+	16.2.消费者的ExchangeClient接口:
+		/**
+		 * @description Client:Remoting Client,
+		 */
+		public interface ExchangeClient extends Client, ExchangeChannel {
+
+		}
+		-->其父类ExchangeChannel类:
+			public interface ExchangeChannel extends Channel {
+			    /**
+			     * send request.
+			     *
+			     * @param request
+			     * @return response future
+			     * @throws RemotingException
+			     */
+			    ResponseFuture request(Object request) throws RemotingException;
+			    /**
+			     * send request.
+			     *
+			     * @param request
+			     * @param timeout
+			     * @return response future
+			     * @throws RemotingException
+			     */
+			    ResponseFuture request(Object request, int timeout) throws RemotingException;
+			    /**
+			     * get message handler.
+			     *
+			     * @return message handler
+			     */
+			    ExchangeHandler getExchangeHandler();
+			    /**
+			     * graceful close. // 优美关闭
+			     *
+			     * @param timeout
+			     */
+			    void close(int timeout);
+			}
+	16.3.提供者的ExchangeServer接口:
+		public interface ExchangeServer extends Server {
+		    /**
+		     * get channels.
+		     *
+		     * @return channels
+		     */
+		    Collection<ExchangeChannel> getExchangeChannels();
+
+		    /**
+		     * get channel.
+		     *
+		     * @param remoteAddress
+		     * @return channel
+		     */
+		    ExchangeChannel getExchangeChannel(InetSocketAddress remoteAddress);
+		}
+	16.4.提供者的ExchangeHandler接口:
+		public interface ExchangeHandler extends ChannelHandler, TelnetHandler {
+		    /**
+		     * reply. 回复给DubboHandler
+		     *
+		     * @param channel
+		     * @param request
+		     * @return response
+		     * @throws RemotingException
+		     */
+		    Object reply(ExchangeChannel channel, Object request) throws RemotingException;
+		}
+=======================================================================================================================
+17.Dubbo框架的Transport(传输层)
+	17.1.消费者和提供者共同拥有的接口:Transporter
+		@SPI("netty")
+		public interface Transporter {
+		    /**
+		     * Bind a server.
+		     *
+		     * @param url     server url
+		     * @param handler
+		     * @return server
+		     * @throws RemotingException
+		     * @see com.alibaba.dubbo.remoting.Transporters#bind(URL, Receiver, ChannelHandler)
+		     */
+		    @Adaptive({Constants.SERVER_KEY, Constants.TRANSPORTER_KEY})
+		    Server bind(URL url, ChannelHandler handler) throws RemotingException;
+
+		    /**
+		     * Connect to a server.
+		     *
+		     * @param url     server url
+		     * @param handler
+		     * @return client
+		     * @throws RemotingException
+		     * @see com.alibaba.dubbo.remoting.Transporters#connect(URL, Receiver, ChannelListener)
+		     */
+		    @Adaptive({Constants.CLIENT_KEY, Constants.TRANSPORTER_KEY})
+		    Client connect(URL url, ChannelHandler handler) throws RemotingException;
+		}
+	17.2.消费者的接口Client(Remoting Client):
+		public interface Client extends Endpoint, Channel, Resetable {
+		    /**
+		     * reconnect.
+		     */
+		    void reconnect() throws RemotingException;
+
+		    @Deprecated
+		    void reset(com.alibaba.dubbo.common.Parameters parameters);
+
+		}
+	17.3.提供者的接口Server(Remoting Server)：
+		public interface Server extends Endpoint, Resetable {
+		    /**
+		     * is bound.
+		     *
+		     * @return bound
+		     */
+		    boolean isBound();
+
+		    /**
+		     * get channels.
+		     *
+		     * @return channels
+		     */
+		    Collection<Channel> getChannels();
+		    /**
+		     * get channel.
+		     *
+		     * @param remoteAddress
+		     * @return channel
+		     */
+		    Channel getChannel(InetSocketAddress remoteAddress);
+
+		    @Deprecated
+		    void reset(com.alibaba.dubbo.common.Parameters parameters);
+
+		}
+	17.4.提供者的接口:ChannelHandler
+		public interface ChannelHandler {
+		    /**
+		     * on channel connected.
+		     *
+		     * @param channel channel.
+		     */
+		    void connected(Channel channel) throws RemotingException;
+
+		    /**
+		     * on channel disconnected.
+		     *
+		     * @param channel channel.
+		     */
+		    void disconnected(Channel channel) throws RemotingException;
+
+		    /**
+		     * on message sent.
+		     *
+		     * @param channel channel.
+		     * @param message message.
+		     */
+		    void sent(Channel channel, Object message) throws RemotingException;
+
+		    /**
+		     * on message received.
+		     *
+		     * @param channel channel.
+		     * @param message message.
+		     */
+		    void received(Channel channel, Object message) throws RemotingException;
+
+		    /**
+		     * on exception caught.
+		     *
+		     * @param channel   channel.
+		     * @param exception exception.
+		     */
+		    void caught(Channel channel, Throwable exception) throws RemotingException;
+		}
+	17.5.提供者的接口:Dispatcher
+		@SPI(AllDispatcher.NAME)
+		public interface Dispatcher {
+		    /**
+		     * dispatch the message to threadpool.
+		     *
+		     * @param handler
+		     * @param url
+		     * @return channel handler
+		     */
+		    @Adaptive({Constants.DISPATCHER_KEY, "dispather", "channel.handler"})
+		    // 后两个参数为兼容旧配置
+		    ChannelHandler dispatch(ChannelHandler handler, URL url);
+		}
+	17.6.消费者和提供者共同拥有的接口:Codec
+		public interface Codec {
+		    /**
+		     * Need more input poison.
+		     *
+		     * @see #decode(Channel, InputStream)
+		     */
+		    Object NEED_MORE_INPUT = new Object();
+		    /**
+		     * Encode message.
+		     *
+		     * @param channel channel.
+		     * @param output  output stream.
+		     * @param message message.
+		     */
+		    @Adaptive({Constants.CODEC_KEY})
+		    void encode(Channel channel, OutputStream output, Object message) throws IOException;
+		    /**
+		     * Decode message.
+		     *
+		     * @param channel channel.
+		     * @param input   input stream.
+		     * @return message or <code>NEED_MORE_INPUT</code> poison.
+		     * @see #NEED_MORE_INPUT
+		     */
+		    @Adaptive({Constants.CODEC_KEY})
+		    Object decode(Channel channel, InputStream input) throws IOException;
+		}
+===========================================================================================================================
+18.Dubbo框架的Serialize层:
+	18.1.消费者和提供者共同拥有的接口:Serialization
+		@SPI("hessian2")
+		public interface Serialization {
+		    /**
+		     * get content type id
+		     *
+		     * @return content type id
+		     */
+		    byte getContentTypeId();
+		    /**
+		     * get content type
+		     *
+		     * @return content type
+		     */
+		    String getContentType();
+		     * create serializer 把服务地址url序列化
+		     *
+		     * @param url
+		     * @param output
+		     * @return serializer
+		     * @throws IOException
+		     */
+		    @Adaptive
+		    ObjectOutput serialize(URL url, OutputStream output) throws IOException;
+		    /**
+		     * create deserializer 反序列化服务地址url
+		     *
+		     * @param url
+		     * @param input
+		     * @return deserializer
+		     * @throws IOException
+		     */
+		    @Adaptive
+		    ObjectInput deserialize(URL url, InputStream input) throws IOException;
+		}
+	18.2.消费者的接口:ObjectInput(对象输入流)
+		public interface ObjectInput extends DataInput {
+		    /**
+		     * read object.
+		     *
+		     * @return object.
+		     */
+		    Object readObject() throws IOException, ClassNotFoundException;
+		    /**
+		     * read object.
+		     *
+		     * @param cls object type.
+		     * @return object.
+		     */
+		    <T> T readObject(Class<T> cls) throws IOException, ClassNotFoundException;
+		    /**
+		     * read object.
+		     *
+		     * @param cls object type.
+		     * @return object.
+		     */
+		    <T> T readObject(Class<T> cls, Type type) throws IOException, ClassNotFoundException;
+		}
+	18.3.提供者的接口:ObjectOutput(对象输出流)
+		public interface ObjectOutput extends DataOutput {
+		    /**
+		     * write object.
+		     *
+		     * @param obj object.
+		     */
+		    void writeObject(Object obj) throws IOException;
+		}
+	18.4.提供者的接口:ThreadPool
+		@SPI("fixed")
+		public interface ThreadPool {
+		    /**
+		     * 线程池
+		     *
+		     * @param url 线程参数
+		     * @return 线程池
+		     */
+		    @Adaptive({Constants.THREADPOOL_KEY})
+		    Executor getExecutor(URL url);
+		}
+============================================================= END ===============================================================
